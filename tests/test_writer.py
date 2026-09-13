@@ -700,6 +700,35 @@ def _unzip_contents(zip_bytes: bytes) -> str:
 
 
 class TestTaskWriter:
+    def test_update_task_to_inbox_explicitly_clears_parent_reference(self) -> None:
+        task = Task(
+            id="task1",
+            name="Move me to inbox",
+            parent_task_id=None,
+            project_id=None,
+            inbox=True,
+            completed=None,
+            flagged=False,
+            due=None,
+            start=None,
+            hidden=None,
+            note="",
+            rank=42,
+            repetition_rule=None,
+            estimated_minutes=None,
+            tag_ids=(),
+            added=NOW,
+            modified=NOW,
+        )
+        writer = TaskWriter(head_id="tail01", parent_tail_id="tail00")
+        plan = writer.update_task(task, when=NOW)
+        root = _parse_transaction(_unzip_contents(plan.deltas[0].data).encode())
+        task_el = root.find(f"{NS}task")
+        assert task_el is not None
+        parent_el = task_el.find(f"{NS}task")
+        assert parent_el is not None
+        assert parent_el.get("idref") is None
+
     def test_empty_plan_iter_compatibility(self) -> None:
         assert tuple(iter(WritePlan(deltas=()))) == ()
         assert tuple(iter(AddTaskPlan(task_id="task1", deltas=()))) == (None, None, "task1")

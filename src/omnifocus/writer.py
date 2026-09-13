@@ -298,6 +298,7 @@ class TransactionBuilder:
         hidden_dt: datetime | None = None,
         project_xml: str | None = None,
         tag_ids: tuple[str, ...] = (),
+        clear_parent_task: bool = False,
         include_snapshot_defaults: bool = False,
     ) -> str:
         """Render a task XML element."""
@@ -308,7 +309,7 @@ class TransactionBuilder:
             children.append(self._leaf("inbox", "true" if inbox else "false"))
         if parent_task_id is not None:
             children.append(f'<task idref="{parent_task_id}"/>')
-        elif include_snapshot_defaults:
+        elif clear_parent_task or include_snapshot_defaults:
             children.append("<task/>")
         if added_dt is not None:
             children.append(self._leaf("added", _format_dt_utc(added_dt)))
@@ -443,6 +444,7 @@ class TransactionBuilder:
         planned_date_alarm_policy: str | None = None,
         hidden_dt: datetime | None = None,
         tag_ids: tuple[str, ...] = (),
+        clear_parent_task: bool = False,
     ) -> None:
         """Add a task element to the transaction."""
         self._elements.append(
@@ -452,6 +454,7 @@ class TransactionBuilder:
                 name=name,
                 parent_task_id=parent_task_id,
                 inbox=inbox,
+                clear_parent_task=clear_parent_task,
                 flagged=flagged,
                 rank=rank,
                 added_dt=added_dt,
@@ -1023,6 +1026,7 @@ class TaskWriter:
             name=task.name,
             parent_task_id=task.parent_task_id,
             inbox=task.inbox,
+            clear_parent_task=task.inbox and task.parent_task_id is None,
             flagged=task.flagged,
             rank=task.rank,
             added_dt=task.added,
