@@ -12,11 +12,11 @@
 #   OF_OP_ITEM       1Password item reference with "username" and "password" fields
 #   OF_ENV_FILE      output path (default ~/.config/omnifocus-cli/credentials.env)
 #   OF_TIMEZONE      IANA zone for "today" (default: this machine's zone)
-#   OF_REPO_REF      git ref used in the uvx snippet (default feat/oss-perspectives)
+#   OF_REPO_REF      git ref used in the uvx snippet (default main)
 set -euo pipefail
 
 env_file="${OF_ENV_FILE:-$HOME/.config/omnifocus-cli/credentials.env}"
-repo_ref="${OF_REPO_REF:-feat/oss-perspectives}"
+repo_ref="${OF_REPO_REF:-main}"
 repo_url="https://github.com/tauto1127/OmniFocus-CLI"
 
 if [[ -n "${OF_OP_ITEM:-}" ]]; then

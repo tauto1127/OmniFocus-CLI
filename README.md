@@ -46,7 +46,6 @@ there headlessly.
 
 ```bash
 git clone https://github.com/tauto1127/OmniFocus-CLI && cd OmniFocus-CLI
-git checkout feat/oss-perspectives
 scripts/setup-omni-sync.sh        # or: OF_OP_ITEM="op://Vault/Item" scripts/setup-omni-sync.sh
 ```
 
