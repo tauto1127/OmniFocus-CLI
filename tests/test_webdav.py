@@ -147,10 +147,9 @@ class TestFromEnv:
         client = WebDAVClient.from_env()
 
         assert client._base_url == BASE_URL
-        auth = client._client.auth
-        assert isinstance(auth, httpx.BasicAuth)
-        request = next(auth.auth_flow(httpx.Request("GET", BASE_URL)))
-        assert request.headers["Authorization"] == "Basic c2VjcmV0LXVzZXI6c2VjcmV0LXBhc3M="
+        assert client._client.auth is None
+        assert client._username == "secret-user"
+        assert client._password == "secret-pass"
 
     def test_rejects_ambiguous_secret_configuration(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

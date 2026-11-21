@@ -37,6 +37,24 @@ podman run --rm \
 
 ## Secrets
 
+### Omni Sync Server redirect opt-in
+
+Cross-origin redirects are denied unless explicitly trusted. If your independently
+verified server configuration requires a redirect to a specific Omni backend,
+set `OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS` in the CLI or container environment,
+for example `-e OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS=https://sync3.omnigroup.com`.
+The hostname here is illustrative, not a recommendation or a discovered server.
+Multiple exact origins may be comma-separated. Only literal origins of the form
+`https://sync<digits>.omnigroup.com` are accepted: no wildcard, port, path,
+query, credentials, or trailing slash. An unset or empty value trusts none;
+malformed entries cause an error. This is not domain-wide trust. Even when
+listed, a cross-origin redirect is permitted only from HTTPS
+`sync.omnigroup.com` on the default port to the listed HTTPS backend on the
+default port, with the same path and no query. Trust permits sending request
+bodies and responding to authentication challenges at that backend, so verify
+the exact destination through a trusted channel before opting in. Official
+server behavior has not been verified against a live server.
+
 Do not embed a username or password in `OF_WEBDAV_URL`, command arguments, or checked-in
 configuration. The WebDAV URL, username, password, encryption passphrase, and HTTPS API key
 also support a mutually exclusive `_FILE` form. This is intended for mounted secret files.
