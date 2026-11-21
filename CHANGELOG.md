@@ -16,6 +16,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - MCP server `instructions`, rewritten tool descriptions for small models, and
   `OF_MCP_TOOLSET=core` (ten-tool subset)
 - `OF_TIMEZONE` for "today" calculations in UTC containers
+- `scripts/setup-omni-sync.sh`: one-step Omni Sync Server setup (1Password or prompt),
+  printing uvx and MCP client snippets
+- Immutable bundle-file cache with parallel downloads: after the first sync, a change
+  on another device downloads only its new transaction files
+- `OF_HTTP_REQUEST_TIMEOUT_SECONDS` for the HTTPS/MCP endpoint
 - Omni Sync Server support: Digest authentication, HTTPS-only bounded redirects, and
   regional shard hosts (`<name>.sync.omnigroup.com`) in `OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS`
 

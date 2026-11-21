@@ -1551,6 +1551,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
 
+def _request_timeout_from_env() -> float:
+    """Return ``OF_HTTP_REQUEST_TIMEOUT_SECONDS`` (default 30s, minimum 1s)."""
+    raw = os.getenv("OF_HTTP_REQUEST_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return _DEFAULT_REQUEST_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise OFError(f"Invalid OF_HTTP_REQUEST_TIMEOUT_SECONDS: {raw!r}") from exc
+    if value < 1:
+        raise OFError(f"Invalid OF_HTTP_REQUEST_TIMEOUT_SECONDS: {raw!r}")
+    return value
+
+
 async def _serve_uvicorn(
     config: HTTPServerConfig,
     *,
@@ -1563,6 +1577,7 @@ async def _serve_uvicorn(
         allowed_hosts=config.allowed_hosts,
         service=service,
         enable_mcp=True,
+        request_timeout_seconds=_request_timeout_from_env(),
     )
     uvicorn_config = uvicorn.Config(
         app,

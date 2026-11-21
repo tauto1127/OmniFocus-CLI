@@ -316,7 +316,8 @@ class TestCacheShape:
         (tmp_path / "of_model.pkl").write_bytes(pickle.dumps(stale))
         model = await store.load()
         assert "perspectives" in vars(model)
-        assert client.get_file.call_count == 2
+        # Rebuilt from the immutable bundle-file cache: no second download.
+        assert client.get_file.call_count == 1
 
     @pytest.mark.asyncio
     async def test_bare_legacy_model_without_perspectives(self, tmp_path: Path) -> None:
@@ -326,3 +327,53 @@ class TestCacheShape:
         (tmp_path / "of_model.pkl").write_bytes(pickle.dumps(legacy))
         await store.load()
         assert client.get_file.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Bundle-file cache and HTTP timeout
+# ---------------------------------------------------------------------------
+
+
+class TestBundleFileCache:
+    @pytest.mark.asyncio
+    async def test_only_new_files_are_downloaded(self, tmp_path: Path) -> None:
+        store, client = _make_store(tmp_path)
+        files = await store._get_bundle_files(["00000000000000=a+b.zip", "2026=b+c.zip"])
+        assert len(files) == 2 and client.get_file.call_count == 2
+        cached = tmp_path / "bundle-files" / "2026=b+c.zip"
+        assert cached.is_file() and (cached.stat().st_mode & 0o777) == 0o600
+        await store._get_bundle_files(["00000000000000=a+b.zip", "2026=b+c.zip", "2027=c+d.zip"])
+        assert client.get_file.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_unsafe_names_are_not_cached(self, tmp_path: Path) -> None:
+        store, client = _make_store(tmp_path)
+        await store._get_bundle_files(["../escape.zip", ".hidden.zip"])
+        await store._get_bundle_files(["../escape.zip"])
+        assert client.get_file.call_count == 3
+        assert not (tmp_path / "bundle-files").exists()
+
+    def test_prune(self, tmp_path: Path) -> None:
+        store, _ = _make_store(tmp_path)
+        store._prune_bundle_file_cache({"keep.zip"})  # no directory yet
+        files = tmp_path / "bundle-files"
+        files.mkdir()
+        (files / "keep.zip").write_bytes(b"k")
+        (files / "old.zip").write_bytes(b"o")
+        store._prune_bundle_file_cache({"keep.zip"})
+        assert sorted(p.name for p in files.iterdir()) == ["keep.zip"]
+
+
+class TestRequestTimeoutEnv:
+    def test_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from omnifocus.errors import OFError
+        from omnifocus.http_api import _DEFAULT_REQUEST_TIMEOUT_SECONDS, _request_timeout_from_env
+
+        monkeypatch.delenv("OF_HTTP_REQUEST_TIMEOUT_SECONDS", raising=False)
+        assert _request_timeout_from_env() == _DEFAULT_REQUEST_TIMEOUT_SECONDS
+        monkeypatch.setenv("OF_HTTP_REQUEST_TIMEOUT_SECONDS", "120")
+        assert _request_timeout_from_env() == 120.0
+        for bad in ("abc", "0.5"):
+            monkeypatch.setenv("OF_HTTP_REQUEST_TIMEOUT_SECONDS", bad)
+            with pytest.raises(OFError, match="OF_HTTP_REQUEST_TIMEOUT_SECONDS"):
+                _request_timeout_from_env()

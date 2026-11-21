@@ -35,6 +35,12 @@ podman run --rm \
   of sync
 ```
 
+The cache directory also keeps the raw bundle ZIPs (still encrypted) under
+`bundle-files/`. OmniFocus never rewrites a bundle file under the same name, so after
+the first sync a change made on another device downloads only its new transaction
+files. Downloads run in parallel (8 at a time). Files no longer in the remote bundle
+are pruned.
+
 ## Secrets
 
 ### Omni Sync Server redirect opt-in
@@ -159,6 +165,10 @@ podman run --rm --pull=always ghcr.io/szymczag/omnifocus-cli:latest --version
 | `OF_HTTP_TLS_CERT_FILE` | HTTPS only | TLS certificate PEM path |
 | `OF_HTTP_TLS_KEY_FILE` | HTTPS only | TLS private key PEM path |
 | `OF_HTTP_ALLOWED_HOSTS` | HTTPS only | Comma-separated trusted host allowlist |
+| `OF_HTTP_REQUEST_TIMEOUT_SECONDS` | No | Per-request wall-clock limit (default 30). Raise it if a cold first sync of a large bundle takes longer |
+| `OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS` | No | Comma-separated Omni Sync shard origins that redirects may go to |
+| `OF_TIMEZONE` | No | IANA zone used for "today" in perspectives and date rules (set it in UTC containers) |
+| `OF_MCP_TOOLSET` | No | `core` exposes the ten everyday MCP tools only (small models) |
 
 ## Operational Notes
 

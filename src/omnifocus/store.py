@@ -59,6 +59,7 @@ import json
 import logging
 import os
 import pickle
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -101,6 +102,10 @@ from omnifocus.writer import (
 log = logging.getLogger(__name__)
 
 _CACHE_FILENAME = "of_model.pkl"
+# Raw (still encrypted) bundle ZIPs, keyed by their immutable file names.
+_FILES_DIRNAME = "bundle-files"
+_SAFE_BUNDLE_FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9=+_.-]*\.zip")
+_DOWNLOAD_CONCURRENCY = 8
 _WRITER_STATE_FILENAME = "writer_state.json"
 _WRITER_IDENTITY_FILENAME = "writer_identity.json"
 
@@ -755,8 +760,9 @@ class OFocusStore:
         """Download the bundle, decrypt if needed, parse, cache, and return."""
         log.debug("Bundle: baseline=%s  transactions=%d", baseline_name, len(tx_names))
 
-        log.debug("Downloading baseline %s", baseline_name)
-        baseline_raw = await self._client.get_file(baseline_name)
+        raw_files = await self._get_bundle_files([baseline_name, *tx_names])
+        self._prune_bundle_file_cache({baseline_name, *tx_names})
+        baseline_raw = raw_files[0]
         log.debug(
             "Baseline header (hex): %s  ascii: %r",
             baseline_raw[:32].hex(),
@@ -771,11 +777,7 @@ class OFocusStore:
 
         baseline_bytes = self._maybe_decrypt(baseline_raw, doc_keys)
 
-        tx_bytes_list: list[bytes] = []
-        for name in tx_names:
-            log.debug("Downloading transaction %s", name)
-            raw = await self._client.get_file(name)
-            tx_bytes_list.append(self._maybe_decrypt(raw, doc_keys))
+        tx_bytes_list = [self._maybe_decrypt(raw, doc_keys) for raw in raw_files[1:]]
 
         log.debug("Parsing model from %d file(s)…", 1 + len(tx_bytes_list))
         model = build_model(baseline_bytes, tx_bytes_list)
@@ -787,6 +789,46 @@ class OFocusStore:
         )
         self._save_to_cache(_CachePayload(model=model, bundle_fingerprint=bundle_fingerprint))
         return model
+
+    @property
+    def _files_dir(self) -> Path:
+        return self._cache_dir / _FILES_DIRNAME
+
+    async def _get_bundle_files(self, names: list[str]) -> list[bytes]:
+        """Return raw bundle files in order, downloading only the ones not cached yet.
+
+        OmniFocus never rewrites a bundle ZIP under the same name (names embed the
+        transaction identifiers), so a downloaded file can be reused forever. After the
+        first sync, a change on another device costs only its new transaction files
+        instead of a full re-download. Files stay encrypted on disk.
+        """
+        semaphore = asyncio.Semaphore(_DOWNLOAD_CONCURRENCY)
+
+        async def fetch(name: str) -> bytes:
+            path = self._files_dir / name
+            cacheable = _SAFE_BUNDLE_FILENAME.fullmatch(name) is not None
+            if cacheable and path.is_file():
+                return path.read_bytes()
+            async with semaphore:
+                log.debug("Downloading %s", name)
+                data = await self._client.get_file(name)
+            if cacheable:
+                self._files_dir.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_name(path.name + ".part")
+                tmp.write_bytes(data)
+                tmp.chmod(0o600)
+                tmp.replace(path)
+            return data
+
+        return list(await asyncio.gather(*(fetch(name) for name in names)))
+
+    def _prune_bundle_file_cache(self, keep: set[str]) -> None:
+        """Delete cached bundle files that are no longer part of the remote bundle."""
+        if not self._files_dir.is_dir():
+            return
+        for path in self._files_dir.iterdir():
+            if path.name not in keep:
+                path.unlink(missing_ok=True)
 
     async def _prepare_writer(
         self,

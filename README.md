@@ -42,6 +42,20 @@ there headlessly.
 
 ## Quick Start
 
+### Omni Sync Server in one step
+
+```bash
+git clone https://github.com/tauto1127/OmniFocus-CLI && cd OmniFocus-CLI
+git checkout feat/oss-perspectives
+scripts/setup-omni-sync.sh        # or: OF_OP_ITEM="op://Vault/Item" scripts/setup-omni-sync.sh
+```
+
+The script checks the Omni Account login (read-only) and finds your sync shard. It
+writes `~/.config/omnifocus-cli/credentials.env` (mode 0600) and prints copy-paste
+snippets for `uvx` (no install, no container) and for MCP clients such as Claude Code
+and Claude Desktop. On the Omni Sync Server the encryption passphrase is the sync
+password, so no extra secret is needed.
+
 ### Build the runtime image
 
 ```bash
