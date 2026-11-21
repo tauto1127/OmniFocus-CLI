@@ -192,10 +192,13 @@ def test_transport_debug_logs_do_not_include_path(servers, caplog):
         ("https://sync.omnigroup.com/a", "https://user:pass@sync3.omnigroup.com/a", False),
         ("https://sync.omnigroup.com/a", "https://sync3.omnigroup.com:444/a", False),
         ("https://sync.omnigroup.com/a", "https://evil.example/a", False),
+        ("https://sync.omnigroup.com/a", "https://shard-x.sync.omnigroup.com/a", True),
+        ("https://sync.omnigroup.com/a", "https://other.sync.omnigroup.com/a", False),
     ],
 )
 def test_official_backend_redirect_policy(src, dst, allowed):
+    trusted = frozenset({"https://sync3.omnigroup.com", "https://shard-x.sync.omnigroup.com"})
     assert (
-        _safe_redirect(httpx.URL(src), httpx.URL(dst), frozenset({"https://sync3.omnigroup.com"}))
+        _safe_redirect(httpx.URL(src), httpx.URL(dst), trusted)
         is allowed
     )

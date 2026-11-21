@@ -65,3 +65,31 @@ def test_invalid_trust_rejected(monkeypatch, value):
     monkeypatch.setenv("OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS", value)
     with pytest.raises(OFWebDAVError, match="Invalid OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS"):
         WebDAVClient.from_env()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://test-bsdav-sgp.sync.omnigroup.com",
+        "https://sync3.omnigroup.com, https://us-east.sync.omnigroup.com",
+    ],
+)
+def test_regional_shard_trust_accepted(monkeypatch, value):
+    monkeypatch.setenv("OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS", value)
+    WebDAVClient.from_env()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://.sync.omnigroup.com",
+        "https://-bad.sync.omnigroup.com",
+        "https://a.b.sync.omnigroup.com",
+        "https://shard.sync.omnigroup.com.evil.example",
+        "https://shard.sync-omnigroup.com",
+    ],
+)
+def test_regional_shard_trust_rejects_lookalikes(monkeypatch, value):
+    monkeypatch.setenv("OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS", value)
+    with pytest.raises(OFWebDAVError, match="Invalid OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS"):
+        WebDAVClient.from_env()

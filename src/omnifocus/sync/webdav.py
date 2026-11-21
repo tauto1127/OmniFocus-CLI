@@ -46,6 +46,10 @@ _MAX_RETRIES = 3
 _RETRY_BASE_DELAY = 0.5
 _MAX_REDIRECTS = 5
 
+# Omni Sync Server shard hosts: legacy ``sync3.omnigroup.com`` style and the
+# regional ``<name>.sync.omnigroup.com`` style (e.g. ``test-bsdav-sgp``).
+_OMNI_SHARD_HOST = r"(?:sync[0-9]+|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sync)\.omnigroup\.com"
+
 
 def _safe_redirect(
     source: httpx.URL, target: httpx.URL, trusted_origins: frozenset[str] = frozenset()
@@ -62,7 +66,7 @@ def _safe_redirect(
         and str(target.copy_with(path="/", query=None, fragment=None)).rstrip("/")
         in trusted_origins
         and source.host == "sync.omnigroup.com"
-        and re.fullmatch(r"sync[0-9]+\.omnigroup\.com", target.host or "")
+        and re.fullmatch(_OMNI_SHARD_HOST, target.host or "")
         and source.raw_path == target.raw_path
     )
 
@@ -238,7 +242,7 @@ class WebDAVClient:
             frozenset(part.strip() for part in raw_trust.split(",")) if raw_trust else frozenset()
         )
         if any(
-            not re.fullmatch(r"https://sync[0-9]+\.omnigroup\.com", origin) for origin in origins
+            not re.fullmatch(r"https://" + _OMNI_SHARD_HOST, origin) for origin in origins
         ):
             raise OFWebDAVError("Invalid OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS")
         return cls(
