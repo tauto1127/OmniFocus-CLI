@@ -78,6 +78,11 @@ Notes:
 - `tag-add` / `tag-update` manage tag entities themselves.
 - `--tag-id` on task/project mutation commands assigns already-existing tags.
 
+## Perspectives
+
+- `of perspectives [--format table|json]`: list built-in and custom perspectives with rule summaries
+- `of perspective NAME [--limit N] [--available] [--format table|json]`: show a perspective's contents (see [perspectives.md](perspectives.md))
+
 ## Output Modes
 
 - `tasks`: `table` or `json`
@@ -87,7 +92,6 @@ Notes:
 
 ## Not Yet Implemented
 
-- perspectives
 - statistics commands
 - dedicated inbox subcommands
 - dedicated `task view` and `project view` CLI workflows

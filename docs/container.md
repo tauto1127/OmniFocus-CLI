@@ -45,7 +45,8 @@ set `OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS` in the CLI or container environment,
 for example `-e OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS=https://sync3.omnigroup.com`.
 The hostname here is illustrative, not a recommendation or a discovered server.
 Multiple exact origins may be comma-separated. Only literal origins of the form
-`https://sync<digits>.omnigroup.com` are accepted: no wildcard, port, path,
+`https://sync<digits>.omnigroup.com` or a regional shard
+`https://<name>.sync.omnigroup.com` (one DNS label) are accepted: no wildcard, port, path,
 query, credentials, or trailing slash. An unset or empty value trusts none;
 malformed entries cause an error. This is not domain-wide trust. Even when
 listed, a cross-origin redirect is permitted only from HTTPS
@@ -53,7 +54,10 @@ listed, a cross-origin redirect is permitted only from HTTPS
 default port, with the same path and no query. Trust permits sending request
 bodies and responding to authentication challenges at that backend, so verify
 the exact destination through a trusted channel before opting in. Official
-server behavior has not been verified against a live server.
+server behavior was verified read-only against a live account redirected to a
+regional shard (`sync.omnigroup.com` → `<name>.sync.omnigroup.com`, Digest auth). Run
+`curl -s -o /dev/null -w '%{redirect_url}' https://sync.omnigroup.com/<user>/` to see
+your shard. On Omni Sync Server the encryption passphrase defaults to the sync password.
 
 Do not embed a username or password in `OF_WEBDAV_URL`, command arguments, or checked-in
 configuration. The WebDAV URL, username, password, encryption passphrase, and HTTPS API key

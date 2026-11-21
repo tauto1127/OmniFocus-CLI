@@ -79,7 +79,36 @@ Create each secret from a trusted interactive input channel with `podman secret 
 Avoid URL-embedded credentials: they appear in process arguments and are easy to leak through
 configuration, logs, and shell history.
 
+## Small models and tool choice
+
+The server sends MCP `instructions` describing the intended workflow: perspectives
+first, `search_tasks` for keyword lookups, ids copied exactly, and confirmation before
+bulk changes. Each tool description says when to use it and which sibling tool to use
+instead.
+
+Set `OF_MCP_TOOLSET=core` to expose only ten everyday tools (`list_perspectives`,
+`get_perspective_tasks`, `search_tasks`, `get_task`, `add_task`, `complete_task`,
+`update_task`, `list_projects`, `list_tags`, `sync_now`). A short tool list
+measurably helps small local models pick the right tool. The full set remains
+callable by name.
+
+Set `OF_TIMEZONE` (e.g. `Asia/Tokyo`) so "today" is correct inside UTC containers.
+
 ## Tool Surface
+
+### Perspectives
+
+#### `list_perspectives`
+
+- Required inputs: none
+- Response: `[{name, id, kind: builtin|custom, shows}]` in sidebar order; `shows` is a plain-English summary of the rules
+
+#### `get_perspective_tasks`
+
+- Required inputs: `name` (name, id or alias such as `Forecast` / `予測`)
+- Optional inputs: `limit` (default 50, max 500), `only_available`
+- Response: `{perspective, kind, shows, total, returned, sorted_by, items, truncated?, warnings?}`; each item has `id`, `kind`, `name`, `available`, plus `project`, `parent_task`, `tags`, `due`, `defer`, `planned`, `flagged`, `overdue`, `estimated_minutes` and `note` (preview) when set
+- See [perspectives.md](perspectives.md) for the supported rules
 
 ### Tasks
 
@@ -110,9 +139,8 @@ configuration, logs, and shell history.
 
 #### `complete_task`
 
-- Required inputs: `query`
-- Optional inputs: none
-- Semantics: accepts a task ID or fuzzy task-name fragment
+- Required inputs: `task_id` or `query`
+- Semantics: `task_id` must be an exact id. A `query` completes a task only when the match is unambiguous (an exact id, a unique exact name, or a single fuzzy match). Otherwise nothing is completed and `candidates` are returned
 - Response: mutation status plus affected task ID
 
 #### `update_task`
@@ -340,6 +368,5 @@ Tag responses include:
 
 ## Not Yet Implemented
 
-- perspectives
 - statistics tools
 - dedicated inbox MCP tools

@@ -7,6 +7,27 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Headless perspectives: `of perspectives`, `of perspective NAME`, and the MCP tools
+  `list_perspectives` / `get_perspective_tasks`. Custom perspective `filterRules` are
+  evaluated from the synced database. Inbox, Forecast, Flagged and Review are emulated
+  (see `docs/perspectives.md`)
+- MCP server `instructions`, rewritten tool descriptions for small models, and
+  `OF_MCP_TOOLSET=core` (ten-tool subset)
+- `OF_TIMEZONE` for "today" calculations in UTC containers
+- Omni Sync Server support: Digest authentication, HTTPS-only bounded redirects, and
+  regional shard hosts (`<name>.sync.omnigroup.com`) in `OF_WEBDAV_TRUSTED_REDIRECT_ORIGINS`
+
+### Fixed
+
+- Tags assigned through OmniFocus 4 `<task-to-tag>` links (every tag except the primary
+  one) were ignored, so multi-tag tasks lost their secondary tags
+- Dropped folders were ignored, so projects inside them looked active
+- `complete_task` no longer completes the top fuzzy match when a name is ambiguous. It
+  returns candidates instead and accepts an explicit `task_id`
+- Caches built by older versions are rebuilt automatically
+
 ## [1.4.1] - 2026-07-18
 
 ### Fixed

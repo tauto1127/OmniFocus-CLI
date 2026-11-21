@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 import click
 
+from omnifocus import perspectives
 from omnifocus.api_common import (
     folder_summary,
     matching_tag_ids,
@@ -607,6 +608,24 @@ class StoreBackedApiService:
         tag = self._require_tag(model, tag_id)
         async with self._store_factory() as store:
             return await store.drop_tag(tag)
+
+    async def list_perspectives(self) -> list[dict[str, Any]]:
+        """Return every perspective (built-in and custom) in sidebar order with a rule summary."""
+        model = await self._load_model(False)
+        return perspectives.list_perspectives(model)
+
+    async def get_perspective_tasks(
+        self,
+        *,
+        name: str,
+        limit: int = perspectives.DEFAULT_LIMIT,
+        only_available: bool = False,
+    ) -> dict[str, Any]:
+        """Evaluate a perspective by name/id/alias and return its matching items."""
+        model = await self._load_model(False)
+        return perspectives.perspective_payload(
+            model, name, limit=limit, only_available=only_available
+        )
 
     async def sync_now(self) -> dict[str, Any]:
         """Force a fresh sync and return top-level object counts for operator surfaces."""

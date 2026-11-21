@@ -127,6 +127,15 @@ def _default_cache_dir() -> Path:
     return Path("/tmp/of-cache")  # noqa: S108
 
 
+def _model_has_current_shape(model: object) -> bool:
+    """Return ``True`` when a cached model was built by a parser with perspective support.
+
+    Older caches lack ``perspectives`` and were built without ``<task-to-tag>`` links, so
+    their tag assignments may be incomplete; they must be rebuilt rather than reused.
+    """
+    return isinstance(model, OFModel) and "perspectives" in vars(model)
+
+
 @dataclasses.dataclass(frozen=True)
 class _CachePayload:
     """Serializable cache payload for a parsed model and bundle fingerprint."""
@@ -1188,8 +1197,11 @@ class OFocusStore:
             cached = pickle.loads(data)  # noqa: S301 — trusted internal cache
             log.debug("Cache hit: %s", self._cache_path)
             if isinstance(cached, _CachePayload):
+                if not _model_has_current_shape(cached.model):
+                    log.debug("Cache predates perspective/tag-link parsing; rebuilding")
+                    return None
                 return cached
-            if isinstance(cached, OFModel):
+            if isinstance(cached, OFModel) and _model_has_current_shape(cached):
                 return _CachePayload(model=cached, bundle_fingerprint=None)
             return None
         except Exception:  # pragma: no cover — corrupted cache is skipped

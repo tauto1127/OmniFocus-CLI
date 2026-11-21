@@ -251,15 +251,17 @@ def _parse_response(contents: list) -> Any:
 
 class TestListTools:
     @pytest.mark.asyncio
-    async def test_returns_twenty_five_tools(self) -> None:
+    async def test_returns_twenty_seven_tools(self) -> None:
         tools = await list_tools()
-        assert len(tools) == 25
+        assert len(tools) == 27
 
     @pytest.mark.asyncio
     async def test_tool_names(self) -> None:
         tools = await list_tools()
         names = {t.name for t in tools}
         expected = {
+            "list_perspectives",
+            "get_perspective_tasks",
             "list_tasks",
             "search_tasks",
             "get_task",

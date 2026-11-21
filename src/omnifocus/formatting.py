@@ -504,3 +504,53 @@ def _tag_tree_label(tag: dict[str, Any]) -> str:
     if tag.get("hidden"):
         label += " [dim]dropped[/dim]"
     return label
+
+
+# ---------------------------------------------------------------------------
+# Perspectives
+# ---------------------------------------------------------------------------
+
+
+def render_perspectives_table(rows: list[dict[str, Any]], console: Console | None = None) -> None:
+    """Render the perspective list (name, kind, rule summary) as a table."""
+    out = console or _DEFAULT_CONSOLE
+    table = Table(box=box.SIMPLE_HEAD, show_lines=False)
+    table.add_column("Name", style="bold")
+    table.add_column("Kind", style="dim")
+    table.add_column("Shows")
+    for row in rows:
+        table.add_row(str(row["name"]), str(row["kind"]), str(row["shows"]))
+    out.print(table)
+
+
+def render_perspective_table(payload: dict[str, Any], console: Console | None = None) -> None:
+    """Render one evaluated perspective (see ``perspectives.perspective_payload``)."""
+    out = console or _DEFAULT_CONSOLE
+    out.print(f"[bold]{payload['perspective']}[/bold]  [dim]{payload['shows']}[/dim]")
+    table = Table(box=box.SIMPLE_HEAD, show_lines=False)
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Name")
+    table.add_column("Project", style="cyan")
+    table.add_column("Tags", style="magenta")
+    table.add_column("Due", no_wrap=True)
+    for item in payload["items"]:
+        name = str(item["name"])
+        if item.get("flagged"):
+            name = "⚑ " + name
+        if not item.get("available"):
+            name = f"[dim]{name}[/dim]"
+        due = str(item.get("due") or item.get("planned") or "")
+        if item.get("overdue"):
+            due = f"[red]{due}[/red]"
+        table.add_row(
+            str(item["id"]),
+            name,
+            str(item.get("project") or ("Inbox" if item.get("kind") == "task" else "")),
+            ", ".join(item.get("tags", [])),
+            due,
+        )
+    out.print(table)
+    for warning in payload.get("warnings", []):
+        out.print(f"[yellow]warning:[/yellow] {warning}")
+    if "truncated" in payload:
+        out.print(f"[dim]{payload['truncated']}[/dim]")

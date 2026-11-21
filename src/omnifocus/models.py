@@ -18,6 +18,7 @@ __author__ = "Maciej Szymczak <maciej@szymczak.at>"
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,8 @@ class Folder:
         rank: Integer sort key used to order siblings.
         added: UTC datetime when the folder was created.
         modified: UTC datetime of the last modification.
+        hidden: UTC datetime when the folder was dropped, or ``None`` if active.
+            Projects inside a dropped folder (at any depth) are dropped too.
     """
 
     id: str
@@ -40,6 +43,7 @@ class Folder:
     rank: int
     added: datetime
     modified: datetime
+    hidden: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,8 @@ class Tag:
         modified: UTC datetime when the tag was last modified, or ``None`` when unknown.
         note: Plain-text note content.
         hidden: UTC datetime when the tag was dropped/hidden, or ``None`` if visible.
+        on_hold: ``True`` when the tag is On Hold (``<prohibits-next-action>``);
+            actions carrying an on-hold tag are not available.
     """
 
     id: str
@@ -65,6 +71,7 @@ class Tag:
     modified: datetime | None = None
     note: str = ""
     hidden: datetime | None = None
+    on_hold: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,6 +126,7 @@ class Project:
     defer_date_alarm_policy: str | None = None
     latest_time_to_start_alarm_policy: str | None = None
     planned_date_alarm_policy: str | None = None
+    order: str = "parallel"
 
 
 @dataclass(frozen=True)
@@ -177,6 +185,32 @@ class Task:
     defer_date_alarm_policy: str | None = None
     latest_time_to_start_alarm_policy: str | None = None
     planned_date_alarm_policy: str | None = None
+    planned: datetime | None = None
+
+
+@dataclass(frozen=True)
+class Perspective:
+    """A custom (or synced built-in) OmniFocus perspective definition.
+
+    Attributes:
+        id: Opaque identifier (built-ins synced from OmniFocus use ids such as
+            ``ProcessCompleted``).
+        name: Display name shown in the OmniFocus sidebar.
+        filter_rules: Decoded ``filterRules`` JSON: a list of single-key rule
+            objects such as ``{"actionAvailability": "available"}``.
+        aggregation: How top-level rules combine: ``"all"``, ``"any"`` or ``"none"``.
+        view_mode: ``"project"`` or ``"context"`` (tag) outline, when known.
+        sort: Saved sort key from the view state (e.g. ``"modified"``), when known.
+        rules_error: Set when the stored rules could not be decoded.
+    """
+
+    id: str
+    name: str
+    filter_rules: list[Any] = field(default_factory=list)
+    aggregation: str = "all"
+    view_mode: str | None = None
+    sort: str | None = None
+    rules_error: str | None = None
 
 
 @dataclass
@@ -190,6 +224,8 @@ class OFModel:
         projects: All projects, keyed by id.
         tasks: All non-project tasks, keyed by id.
         tags: All tags/contexts, keyed by id.
+        perspectives: Custom perspectives synced in the database, keyed by id.
+        settings: Decoded synced ``<setting>`` values keyed by setting id.
         parsed_at: UTC datetime when this model was built from the bundle.
     """
 
@@ -197,6 +233,8 @@ class OFModel:
     projects: dict[str, Project] = field(default_factory=dict)
     tasks: dict[str, Task] = field(default_factory=dict)
     tags: dict[str, Tag] = field(default_factory=dict)
+    perspectives: dict[str, Perspective] = field(default_factory=dict)
+    settings: dict[str, Any] = field(default_factory=dict)
     parsed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property

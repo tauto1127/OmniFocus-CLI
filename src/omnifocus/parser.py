@@ -35,14 +35,18 @@ from __future__ import annotations
 
 __author__ = "Maciej Szymczak <maciej@szymczak.at>"
 
+import base64
 import io
+import json
 import xml.etree.ElementTree as ET
 import zipfile
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Any
 
 from omnifocus.errors import OFParseError
-from omnifocus.models import Folder, OFModel, Project, Tag, Task
+from omnifocus.models import Folder, OFModel, Perspective, Project, Tag, Task
 from omnifocus.recursion_limit import ensure_recursion_limit
 
 # OmniFocus v2 XML namespace
@@ -301,6 +305,7 @@ def _build_folder(el: ET.Element) -> Folder | None:
         rank=_int(el, "rank", 0) or 0,
         added=_parse_dt_utc(added_raw) or _EPOCH,
         modified=_parse_dt_utc(modified_raw) or _EPOCH,
+        hidden=_parse_dt_utc(_text(el, "hidden")),
     )
 
 
@@ -324,7 +329,140 @@ def _build_tag(el: ET.Element) -> Tag | None:
         modified=_parse_dt_utc(_text(el, "modified")),
         note=_text(el, "note") or "",
         hidden=_parse_dt_utc(_text(el, "hidden")),
+        on_hold=_bool(el, "prohibits-next-action"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Property-list values (perspectives and settings)
+# ---------------------------------------------------------------------------
+
+
+def _plist_value(el: ET.Element) -> Any:
+    """Decode one Apple property-list value element (namespace-agnostic).
+
+    Perspectives and settings embed ``<plist>`` payloads inside the OmniFocus
+    XML, so the elements inherit the OmniFocus namespace; only local names
+    matter here.
+    """
+    local = el.tag.rsplit("}", 1)[-1]
+    if local == "dict":
+        children = list(el)
+        result: dict[str, Any] = {}
+        for key_el, value_el in zip(children[::2], children[1::2], strict=False):
+            result[(key_el.text or "").strip()] = _plist_value(value_el)
+        return result
+    if local == "array":
+        return [_plist_value(child) for child in el]
+    if local in ("true", "false"):
+        return local == "true"
+    text = el.text or ""
+    if local == "integer":
+        try:
+            return int(text.strip())
+        except ValueError:
+            return None
+    if local == "real":
+        try:
+            return float(text.strip())
+        except ValueError:
+            return None
+    if local == "data":
+        try:
+            return base64.b64decode("".join(text.split()), validate=True)
+        except ValueError:
+            return None
+    return text
+
+
+def _plist_of(el: ET.Element) -> Any:
+    """Return the decoded value of *el*'s ``<plist>`` child, or ``None``."""
+    plist = el.find(_tag("plist"))
+    if plist is None:
+        return None
+    values = list(plist)
+    return _plist_value(values[0]) if values else None
+
+
+def _build_perspective(el: ET.Element) -> Perspective | None:
+    """Convert a raw ``<perspective>`` element into a :class:`Perspective`.
+
+    Returns ``None`` for perspectives without a name (e.g. layout-only stubs).
+    """
+    pid = el.get("id")
+    payload = _plist_of(el)
+    if not pid or not isinstance(payload, dict):
+        return None
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+
+    rules: list[Any] = []
+    rules_error: str | None = None
+    raw_rules = payload.get("filterRules")
+    if isinstance(raw_rules, str) and raw_rules.strip():
+        try:
+            decoded = json.loads(raw_rules)
+        except ValueError as exc:
+            rules_error = f"filterRules is not valid JSON: {exc}"
+        else:
+            if isinstance(decoded, list):
+                rules = decoded
+            else:
+                rules_error = "filterRules is not a JSON list"
+    elif isinstance(raw_rules, list):
+        rules = raw_rules
+
+    aggregation = payload.get("topLevelFilterAggregation")
+    view_state = payload.get("viewState")
+    view_mode: str | None = None
+    sort: str | None = None
+    if isinstance(view_state, dict):
+        mode = view_state.get("viewMode")
+        view_mode = mode if isinstance(mode, str) else None
+        mode_states = view_state.get("viewModeState")
+        if isinstance(mode_states, dict) and view_mode is not None:
+            mode_state = mode_states.get(view_mode)
+            if isinstance(mode_state, dict) and isinstance(mode_state.get("sort"), str):
+                sort = mode_state["sort"]
+
+    return Perspective(
+        id=pid,
+        name=name.strip(),
+        filter_rules=rules,
+        aggregation=aggregation if aggregation in ("all", "any", "none") else "all",
+        view_mode=view_mode,
+        sort=sort,
+        rules_error=rules_error,
+    )
+
+
+def _task_tag_links(index: _RawIndex) -> dict[str, list[str]]:
+    """Return ``task id -> ordered tag ids`` from ``<task-to-tag>`` link elements.
+
+    OmniFocus 4 keeps only the *primary* tag as an inline ``<context idref>`` on
+    the task; every assigned tag is recorded as a separate ``<task-to-tag>``
+    element (id ``"<task>.<tag>"``) ordered by ``<rank-in-task>``.
+    """
+    ranked: dict[str, list[tuple[str, str]]] = {}
+    for el in index.get("task-to-tag", {}).values():
+        task_id = _idref(el, "task")
+        tag_id = _idref(el, "context")
+        if not task_id or not tag_id:
+            continue
+        ranked.setdefault(task_id, []).append((_text(el, "rank-in-task"), tag_id))
+    return {
+        task_id: [tag_id for _rank, tag_id in sorted(pairs)] for task_id, pairs in ranked.items()
+    }
+
+
+def _merge_tag_ids(inline: tuple[str, ...], linked: list[str] | None) -> tuple[str, ...]:
+    """Combine the inline primary tag with the full linked tag list (deduplicated)."""
+    if not linked:
+        return inline
+    merged = list(linked)
+    merged.extend(tag_id for tag_id in inline if tag_id not in merged)
+    return tuple(merged)
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +532,7 @@ def _build_project(el: ET.Element) -> Project | None:
         defer_date_alarm_policy=_text(el, "defer-date-alarm-policy") or None,
         latest_time_to_start_alarm_policy=_text(el, "latest-time-to-start-alarm-policy") or None,
         planned_date_alarm_policy=_text(el, "planned-date-alarm-policy") or None,
+        order=_text(el, "order") or "parallel",
     )
 
 
@@ -443,6 +582,7 @@ def _build_task(el: ET.Element, project_id: str | None) -> Task | None:
         defer_date_alarm_policy=_text(el, "defer-date-alarm-policy") or None,
         latest_time_to_start_alarm_policy=_text(el, "latest-time-to-start-alarm-policy") or None,
         planned_date_alarm_policy=_text(el, "planned-date-alarm-policy") or None,
+        planned=_parse_dt_local(_text(el, "planned")),
     )
 
 
@@ -568,11 +708,16 @@ def build_model(
         else:
             leaf_els[tid] = el
 
+    tag_links = _task_tag_links(index)
+
     # Step 6: build projects
     projects: dict[str, Project] = {}
     for el in project_els.values():
         project = _build_project(el)
         if project is not None:
+            merged_tags = _merge_tag_ids(project.tag_ids, tag_links.get(project.id))
+            if merged_tags != project.tag_ids:
+                project = replace(project, tag_ids=merged_tags)
             projects[project.id] = project
 
     # Step 7: resolve parent project ids for all leaf tasks
@@ -584,11 +729,24 @@ def build_model(
         project_id = project_id_map.get(tid)
         task = _build_task(el, project_id)
         if task is not None:
+            merged_tags = _merge_tag_ids(task.tag_ids, tag_links.get(task.id))
+            if merged_tags != task.tag_ids:
+                task = replace(task, tag_ids=merged_tags)
             tasks[task.id] = task
+
+    # Step 9: perspectives and synced settings
+    perspectives: dict[str, Perspective] = {}
+    for el in index.get("perspective", {}).values():
+        perspective = _build_perspective(el)
+        if perspective is not None:
+            perspectives[perspective.id] = perspective
+    settings: dict[str, Any] = {sid: _plist_of(el) for sid, el in index.get("setting", {}).items()}
 
     return OFModel(
         folders=folders,
         projects=projects,
         tasks=tasks,
         tags=tags,
+        perspectives=perspectives,
+        settings=settings,
     )

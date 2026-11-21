@@ -61,6 +61,14 @@ class OFProjectNotFound(OFError):
     """Raised when no project matches the given name."""
 
 
+class OFPerspectiveNotFound(OFError):
+    """Raised when a perspective name does not match exactly one perspective.
+
+    The message lists the valid perspective names so callers (including LLM
+    agents) can retry with a correct one.
+    """
+
+
 class OFNotRunning(OFError):
     """Raised when OmniFocus is required to be running but is not.
 

@@ -5,6 +5,8 @@ Runs over stdio transport (suitable for ``podman run --rm -i``).
 
 Tools
 -----
+``list_perspectives``      List built-in and custom perspectives with rule summaries.
+``get_perspective_tasks``  Show what a perspective (Forecast, Flagged, custom...) contains.
 ``list_tasks``      Filter active tasks by inbox/today/flagged/project/due.
 ``search_tasks``    Fuzzy search tasks by name.
 ``get_task``        Retrieve a single task by id.
@@ -30,6 +32,9 @@ Tools
 ``update_tag``      Update a tag.
 ``drop_tag``        Drop a tag.
 ``sync_now``        Trigger a full WebDAV sync.
+
+Set ``OF_MCP_TOOLSET=core`` to expose only the ten everyday tools; this keeps the
+tool list short enough for small local models.
 
 Usage::
 
@@ -64,6 +69,7 @@ __author__ = "Maciej Szymczak <maciej@szymczak.at>"
 
 import asyncio
 import json
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
@@ -93,7 +99,54 @@ from omnifocus.store import OFocusStore
 # Server instance
 # ---------------------------------------------------------------------------
 
-server: Server = Server("omnifocus")
+SERVER_INSTRUCTIONS = """\
+This server reads and edits the user's OmniFocus task database (synced from the
+Omni Sync Server). Follow these rules:
+
+1. To answer "what should I do / what is on my list / show <perspective>", call
+   get_perspective_tasks with a perspective name. Common names: "Forecast" (today
+   and overdue), "Inbox", "Flagged", "Review", plus the user's own perspectives.
+   If you do not know the names, call list_perspectives first. Japanese names
+   such as 予測 / インボックス / フラグ付き work too.
+2. To find one specific task by words, call search_tasks. Use list_tasks only for
+   simple filters (a project, a tag, due dates) that no perspective covers.
+3. Every task has an "id". Copy ids exactly from tool results. To change or
+   complete a task, pass task_id; never guess ids and never invent tags or projects.
+4. Before completing, dropping or moving more than one task, show the user the
+   list and ask for confirmation.
+5. Dates: use "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM" (local time), or the words
+   today / tomorrow / mon..sun.
+6. If the user says they just changed something in the OmniFocus app, call
+   sync_now first, then read again.
+7. Results may include "warnings" or "truncated". Mention warnings to the user;
+   call again with a larger limit if you need the truncated items.
+"""
+
+server: Server = Server("omnifocus", instructions=SERVER_INSTRUCTIONS)
+
+# Tools exposed when OF_MCP_TOOLSET=core (small-model friendly subset).
+CORE_TOOLS = frozenset(
+    {
+        "list_perspectives",
+        "get_perspective_tasks",
+        "search_tasks",
+        "get_task",
+        "add_task",
+        "complete_task",
+        "update_task",
+        "list_projects",
+        "list_tags",
+        "sync_now",
+    }
+)
+
+
+def _enabled_tool_names() -> frozenset[str] | None:
+    """Return the configured tool subset, or ``None`` for every tool."""
+    toolset = os.environ.get("OF_MCP_TOOLSET", "").strip().lower()
+    if toolset == "core":
+        return CORE_TOOLS
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -142,14 +195,69 @@ def _service() -> StoreBackedApiService:
 
 @server.list_tools()  # type: ignore[no-untyped-call, untyped-decorator]
 async def list_tools() -> list[Tool]:
-    """Return the list of all MCP tools provided by this server."""
+    """Return the MCP tools provided by this server (optionally the core subset)."""
+    enabled = _enabled_tool_names()
+    tools = _all_tools()
+    if enabled is None:
+        return tools
+    return [tool for tool in tools if tool.name in enabled]
+
+
+def _all_tools() -> list[Tool]:
+    """Build every tool definition (descriptions are written for small models too)."""
     return [
+        Tool(
+            name="list_perspectives",
+            description=(
+                "List the user's OmniFocus perspectives (saved views) such as Inbox, "
+                "Forecast, Flagged, Review and custom ones. Each row has the name and a "
+                "plain-English summary of what it shows. Use this when you need the exact "
+                "perspective names before calling get_perspective_tasks. Takes no input."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="get_perspective_tasks",
+            description=(
+                "Show the tasks inside one OmniFocus perspective, exactly like opening it "
+                "in the app. Best tool for questions like 'what is due today?' "
+                "(name='Forecast'), 'what is in my inbox?' (name='Inbox') or 'show my "
+                "DeepWork list' (name='DeepWork'). Returns rows with id, name, project, "
+                "tags, due/defer dates, flagged and available. Do NOT use it to find a "
+                "single task by keywords; use search_tasks for that."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "Perspective name, e.g. 'Forecast', 'Inbox', 'Flagged', 'Review' "
+                            "or a custom name from list_perspectives. Case-insensitive."
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum rows to return (default 50, max 500).",
+                    },
+                    "only_available": {
+                        "type": "boolean",
+                        "description": (
+                            "true = hide deferred or blocked tasks and keep only what can be "
+                            "done now. Default false."
+                        ),
+                    },
+                },
+                "required": ["name"],
+            },
+        ),
         Tool(
             name="list_tasks",
             description=(
-                "List active OmniFocus tasks. "
-                "Optionally filter by inbox, today (due today or overdue), "
-                "flagged, project name (substring), or tasks with a due date."
+                "List remaining OmniFocus tasks with simple filters (inbox, today = due "
+                "today or overdue, flagged, project name, tag name, due/defer dates). "
+                "Prefer get_perspective_tasks for the user's saved views and search_tasks "
+                "for keyword lookups; use this only when neither fits."
             ),
             inputSchema={
                 "type": "object",
@@ -186,7 +294,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="search_tasks",
-            description="Fuzzy search tasks by name or ID.",
+            description=(
+                "Find remaining tasks whose name matches some words (fuzzy match, best "
+                "first). Use this to get a task's id before get_task, update_task or "
+                "complete_task. Example: query='dentist'."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -198,7 +310,10 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_task",
-            description="Get a single task by its OmniFocus ID.",
+            description=(
+                "Get full details (note, dates, tags, project) of one task by its id. "
+                "Get the id from search_tasks or get_perspective_tasks first."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -209,7 +324,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="add_task",
-            description="Create a new OmniFocus task.",
+            description=(
+                "Create one new task. Without 'project' it goes to the Inbox (safest "
+                "choice when unsure). Only 'name' is required. Example: "
+                "{'name': 'Call the dentist', 'due': 'tomorrow'}."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -257,18 +376,35 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="complete_task",
-            description="Mark a task as completed by ID or fuzzy name.",
+            description=(
+                "Mark one task as completed (checked off). Pass task_id copied from "
+                "another tool's result. If you only pass 'query' (words from the name) "
+                "and several tasks match, nothing is completed and the candidates are "
+                "returned so you can retry with task_id."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Task ID or name fragment"},
+                    "task_id": {
+                        "type": "string",
+                        "description": "Exact task id (preferred).",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Task id or words from the task name.",
+                    },
                 },
-                "required": ["query"],
             },
         ),
         Tool(
             name="update_task",
-            description="Update a task's fields or mark it dropped.",
+            description=(
+                "Change fields of one existing task by task_id: rename, move to a project "
+                "(project_id) or the inbox, set or clear due/defer dates (empty string "
+                "clears), flag, note, estimate, tags (tag_ids replaces all tags; get ids "
+                "from list_tags) or drop it (dropped=true). Only send the fields to change. "
+                "To check a task off use complete_task instead."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -399,7 +535,10 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="list_projects",
-            description="List OmniFocus projects.",
+            description=(
+                "List projects (default: active ones) with their ids, folders and review "
+                "info. Use it to get a project_id for add_task or update_task."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -501,7 +640,10 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="list_tags",
-            description="List OmniFocus tags/contexts.",
+            description=(
+                "List tags (also called contexts) with their ids. Use it to get tag_ids "
+                "for update_task. Never invent tag ids."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -560,7 +702,10 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="sync_now",
-            description="Trigger a full sync from the WebDAV server.",
+            description=(
+                "Download the latest data from the sync server. Call it when the user "
+                "says they just changed something in the OmniFocus app, then read again."
+            ),
             inputSchema={"type": "object", "properties": {}},
         ),
     ]
@@ -575,6 +720,8 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     """Dispatch incoming tool calls to the appropriate handler."""
     handlers: dict[str, Any] = {
+        "list_perspectives": _handle_list_perspectives,
+        "get_perspective_tasks": _handle_get_perspective_tasks,
         "list_tasks": _handle_list_tasks,
         "search_tasks": _handle_search_tasks,
         "get_task": _handle_get_task,
@@ -609,6 +756,20 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await typed_handler(arguments)
     except OFError as exc:
         return _text({"error": str(exc)})
+
+
+async def _handle_list_perspectives(args: dict[str, Any]) -> list[TextContent]:
+    return await _service_text(_service().list_perspectives())
+
+
+async def _handle_get_perspective_tasks(args: dict[str, Any]) -> list[TextContent]:
+    return await _service_text(
+        _service().get_perspective_tasks(
+            name=str(args.get("name", "")),
+            limit=int(args.get("limit", 50)),
+            only_available=bool(args.get("only_available", False)),
+        )
+    )
 
 
 async def _handle_list_tasks(args: dict[str, Any]) -> list[TextContent]:
@@ -679,12 +840,35 @@ async def _handle_add_task(args: dict[str, Any]) -> list[TextContent]:
 
 
 async def _handle_complete_task(args: dict[str, Any]) -> list[TextContent]:
-    query = str(args.get("query", ""))
+    query = str(args.get("task_id") or args.get("query") or "").strip()
+    if not query:
+        return _text({"error": "Pass task_id (preferred) or query."})
     model = await _load_model()
-    results = find_tasks(query, model.active_tasks, limit=5)
-    if not results:
-        return _text({"error": f"No active task matching {query!r}"})
-    task = results[0].task
+    active = model.active_tasks
+    by_id = {task.id: task for task in active}
+    if query in by_id:
+        task = by_id[query]
+    else:
+        if args.get("task_id"):
+            return _text({"error": f"No remaining task with id {query!r}. Use search_tasks."})
+        results = find_tasks(query, active, limit=5)
+        if not results:
+            return _text({"error": f"No active task matching {query!r}"})
+        exact = [r.task for r in results if r.task.name.casefold() == query.casefold()]
+        if len(exact) == 1:
+            task = exact[0]
+        elif len(results) == 1:
+            task = results[0].task
+        else:
+            return _text(
+                {
+                    "error": (
+                        f"{len(results)} tasks match {query!r}; nothing was completed. "
+                        "Ask the user which one, then call complete_task with its task_id."
+                    ),
+                    "candidates": [task_summary(r.task, model) for r in results],
+                }
+            )
 
     async with OFocusStore.from_env() as store:
         result = await store.complete_task(task)

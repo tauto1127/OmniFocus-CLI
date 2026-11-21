@@ -27,11 +27,12 @@ from __future__ import annotations
 __author__ = "Maciej Szymczak <maciej@szymczak.at>"
 
 import asyncio
+import json
 from datetime import UTC, datetime
 
 import click
 
-from omnifocus import __version__
+from omnifocus import __version__, perspectives
 from omnifocus.dateparse import parse_due
 from omnifocus.errors import (
     OFBundleNotFound,
@@ -42,6 +43,8 @@ from omnifocus.errors import (
 from omnifocus.formatting import (
     render_folder_tree,
     render_folders_json,
+    render_perspective_table,
+    render_perspectives_table,
     render_project_tree,
     render_projects_json,
     render_tag_tree,
@@ -378,6 +381,56 @@ def tasks_cmd(
         click.echo(f"{len(tasks)} task(s) shown.", err=True)
 
     _run(_run_tasks())
+
+
+# ---------------------------------------------------------------------------
+# of perspectives / of perspective
+# ---------------------------------------------------------------------------
+
+
+@cli.command("perspectives")
+@click.option(
+    "--format", "fmt", type=click.Choice(["table", "json"]), default="table", help="Output format."
+)
+def perspectives_cmd(fmt: str) -> None:
+    """List built-in and custom perspectives with a summary of their rules."""
+
+    async def _run_list() -> None:
+        model = await _get_model()
+        rows = perspectives.list_perspectives(model)
+        if fmt == "json":
+            click.echo(json.dumps(rows, ensure_ascii=False, indent=2))
+        else:
+            render_perspectives_table(rows)
+
+    _run(_run_list())
+
+
+@cli.command("perspective")
+@click.argument("name")
+@click.option("--limit", default=perspectives.DEFAULT_LIMIT, show_default=True, help="Max rows.")
+@click.option("--available", "only_available", is_flag=True, help="Only available items.")
+@click.option(
+    "--format", "fmt", type=click.Choice(["table", "json"]), default="table", help="Output format."
+)
+def perspective_cmd(name: str, limit: int, only_available: bool, fmt: str) -> None:
+    """Show the contents of a perspective (e.g. Forecast, Inbox, or a custom one)."""
+
+    async def _run_view() -> None:
+        model = await _get_model()
+        try:
+            payload = perspectives.perspective_payload(
+                model, name, limit=limit, only_available=only_available
+            )
+        except OFError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if fmt == "json":
+            click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            render_perspective_table(payload)
+            click.echo(f"{payload['returned']} of {payload['total']} item(s) shown.", err=True)
+
+    _run(_run_view())
 
 
 # ---------------------------------------------------------------------------
