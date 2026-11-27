@@ -307,7 +307,7 @@ class StoreBackedApiService:
         projects = [
             project
             for project in model.projects.values()
-            if status == "all" or project.status == status
+            if status == "all" or model.effective_project_status(project) == status
         ]
         if tag_id:
             self._require_tag(model, tag_id)
@@ -425,7 +425,7 @@ class StoreBackedApiService:
         candidates = [
             project
             for project in model.projects.values()
-            if project.status in {"active", "inactive"}
+            if model.effective_project_status(project) in {"active", "inactive"}
         ]
         summaries = [
             (
@@ -463,14 +463,24 @@ class StoreBackedApiService:
         summary["status"] = "reviewed"
         return summary
 
-    async def list_folders(self) -> list[dict[str, Any]]:
-        """List all folders with direct child folder and project references."""
+    async def list_folders(self, *, include_dropped: bool = False) -> list[dict[str, Any]]:
+        """List folders with direct child folder and project references.
+
+        Folders that are dropped, or sit inside a dropped folder, are hidden in the apps and
+        are left out unless *include_dropped* is true.
+        """
         model = await self._load_model(False)
         folders = sorted(
-            model.folders.values(),
+            (
+                folder
+                for folder in model.folders.values()
+                if include_dropped or model.folder_dropped_at(folder.id) is None
+            ),
             key=lambda folder: (folder.rank, folder.name.lower()),
         )
-        return [folder_summary(folder, model) for folder in folders]
+        return [
+            folder_summary(folder, model, include_dropped=include_dropped) for folder in folders
+        ]
 
     async def get_folder(self, *, folder_id: str) -> dict[str, Any]:
         """Return a single folder summary by stable OmniFocus folder ID."""
@@ -478,10 +488,31 @@ class StoreBackedApiService:
         folder = self._require_folder(model, folder_id)
         return folder_summary(folder, model)
 
-    async def get_folder_tree(self) -> dict[str, Any]:
-        """Return the nested folder tree used by CLI and HTTP folder views."""
+    async def get_folder_tree(self, *, include_all: bool = False) -> dict[str, Any]:
+        """Return the nested folder tree used by CLI and HTTP folder views.
+
+        By default the tree matches the apps' remaining view: dropped folders (and everything
+        inside them) and completed or dropped projects are left out. *include_all* returns
+        every folder and project; projects then carry their effective ``status``.
+        """
         model = await self._load_model(False)
-        return build_folder_tree_data(model.folders, model.projects)
+        if include_all:
+            folders = model.folders
+            projects = model.projects
+        else:
+            folders = {
+                folder_id: folder
+                for folder_id, folder in model.folders.items()
+                if model.folder_dropped_at(folder_id) is None
+            }
+            projects = {
+                project_id: project
+                for project_id, project in model.projects.items()
+                if model.effective_project_status(project) in {"active", "inactive"}
+            }
+        tree = build_folder_tree_data(folders, projects)
+        _apply_effective_status(tree, model)
+        return tree
 
     async def add_folder(
         self,
@@ -687,7 +718,7 @@ class StoreBackedApiService:
         project = model.projects.get(task.project_id or "")
         if project is None:
             return project_status == "active"
-        return project.status == project_status
+        return model.effective_project_status(project) == project_status
 
     def _parse_due_like(self, value: str | None, *, field: str) -> datetime | None:
         """Parse ISO or CLI-style natural date inputs."""
@@ -911,6 +942,30 @@ class StoreBackedApiService:
         if status == "done" and updated.completed is None:
             updated = dataclasses.replace(updated, completed=now)
         return updated
+
+
+def _apply_effective_status(tree: dict[str, Any], model: OFModel) -> None:
+    """Rewrite project ``status`` values in a folder tree to what the apps show."""
+
+    def fix(project: dict[str, Any]) -> None:
+        stored = model.projects[project["id"]]
+        effective = model.effective_project_status(stored)
+        if effective != project["status"]:
+            project["own_status"] = project["status"]
+            project["status"] = effective
+            project["dropped_by_folder"] = True
+
+    def walk(node: dict[str, Any]) -> None:
+        for project in node["projects"]:
+            fix(project)
+        for child in node["children"]:
+            walk(child)
+
+    for node in tree["folders"]:
+        walk(node)
+    for key in ("no_folder_projects", "dangling_folder_projects"):
+        for project in tree.get(key, []):
+            fix(project)
 
 
 def default_api_service() -> StoreBackedApiService:

@@ -69,7 +69,7 @@ from urllib.parse import urlsplit
 from omnifocus.crypto.discovery import is_encrypted
 from omnifocus.env import read_env_or_file
 from omnifocus.errors import OFEncryptionError, OFError, OFWebDAVError
-from omnifocus.models import Folder, OFModel, Project, Tag, Task
+from omnifocus.models import PARSER_VERSION, Folder, OFModel, Project, Tag, Task
 from omnifocus.parser import build_model
 from omnifocus.review import mark_project_reviewed as mark_reviewed_project
 from omnifocus.sync.client_state import (
@@ -137,8 +137,14 @@ def _model_has_current_shape(model: object) -> bool:
 
     Older caches lack ``perspectives`` and were built without ``<task-to-tag>`` links, so
     their tag assignments may be incomplete; they must be rebuilt rather than reused.
+    Caches from an older :data:`~omnifocus.models.PARSER_VERSION` (for example, built before
+    rich-text notes were read) are rebuilt too.
     """
-    return isinstance(model, OFModel) and "perspectives" in vars(model)
+    return (
+        isinstance(model, OFModel)
+        and "perspectives" in vars(model)
+        and vars(model).get("parser_version", 0) >= PARSER_VERSION
+    )
 
 
 @dataclasses.dataclass(frozen=True)

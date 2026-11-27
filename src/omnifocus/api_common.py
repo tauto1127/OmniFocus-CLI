@@ -98,8 +98,15 @@ def project_summary(
     """Return a concise dict representation of a project."""
     folder = model.folders.get(project.folder_id or "")
     review_state = compute_project_review_state(project, now=now)
+    summary: dict[str, Any] = dataclasses.asdict(project)
+    effective_status = model.effective_project_status(project)
+    if effective_status != project.status:
+        # Report what the apps show; keep the stored value for callers that need it.
+        summary["status"] = effective_status
+        summary["own_status"] = project.status
+        summary["dropped_by_folder"] = True
     return {
-        **dataclasses.asdict(project),
+        **summary,
         "folder_name": folder.name if folder is not None else None,
         "tag_names": [
             model.tags[tag_id].name for tag_id in project.tag_ids if tag_id in model.tags
@@ -127,13 +134,23 @@ def project_review_sort_key(
     return (bucket, due_at, rank, name, project_id)
 
 
-def folder_summary(folder: Folder, model: OFModel) -> dict[str, Any]:
-    """Return a concise dict representation of a folder."""
+def folder_summary(
+    folder: Folder,
+    model: OFModel,
+    *,
+    include_dropped: bool = True,
+) -> dict[str, Any]:
+    """Return a concise dict representation of a folder.
+
+    With ``include_dropped=False``, dropped child folders are left out of
+    ``child_folder_ids`` so callers do not follow links the apps hide.
+    """
     child_folders = sorted(
         (
             candidate
             for candidate in model.folders.values()
             if candidate.parent_folder_id == folder.id
+            and (include_dropped or candidate.hidden is None)
         ),
         key=lambda item: (item.rank, item.name.lower(), item.id),
     )
@@ -141,8 +158,10 @@ def folder_summary(folder: Folder, model: OFModel) -> dict[str, Any]:
         (project for project in model.projects.values() if project.folder_id == folder.id),
         key=lambda item: (item.rank, item.name.lower(), item.id),
     )
+    dropped_at = model.folder_dropped_at(folder.id)
     return {
         **dataclasses.asdict(folder),
+        "dropped": dropped_at is not None,
         "child_folder_ids": [candidate.id for candidate in child_folders],
         "project_ids": [project.id for project in child_projects],
     }

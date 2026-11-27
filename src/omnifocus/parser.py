@@ -46,7 +46,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from omnifocus.errors import OFParseError
-from omnifocus.models import Folder, OFModel, Perspective, Project, Tag, Task
+from omnifocus.models import (
+    PARSER_VERSION,
+    Folder,
+    OFModel,
+    Perspective,
+    Project,
+    RichNote,
+    Tag,
+    Task,
+)
 from omnifocus.recursion_limit import ensure_recursion_limit
 
 # OmniFocus v2 XML namespace
@@ -102,6 +111,50 @@ def _text(el: ET.Element, local: str, default: str = "") -> str:
     if child is None or child.text is None:
         return default
     return child.text.strip()
+
+
+def _local(tag: str) -> str:
+    """Return *tag* without its XML namespace."""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _escape_xml(text: str, *, attribute: bool = False) -> str:
+    escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return escaped.replace('"', "&quot;") if attribute else escaped
+
+
+def _serialize_local(el: ET.Element) -> str:
+    """Serialize *el* with un-prefixed tag names, as OmniFocus writes them."""
+    tag = _local(el.tag)
+    attrs = "".join(
+        f' {_local(key)}="{_escape_xml(value, attribute=True)}"' for key, value in el.attrib.items()
+    )
+    children = "".join(_serialize_local(child) + _escape_xml(child.tail or "") for child in el)
+    text = _escape_xml(el.text or "")
+    if not text and not children:
+        return f"<{tag}{attrs}/>"
+    return f"<{tag}{attrs}>{text}{children}</{tag}>"
+
+
+def _note(el: ET.Element) -> str:
+    """Return the plain text of *el*'s ``<note>``.
+
+    App-written notes are rich text (``<note><text><p><run><lit>…``); each ``<p>`` becomes
+    one line built from its ``<lit>`` runs, and the result is a :class:`RichNote` that keeps
+    the original XML for writers. Plain-text notes (as older CLI versions wrote them) are
+    returned as-is.
+    """
+    child = el.find(_tag("note"))
+    if child is None:
+        return ""
+    text_el = child.find(_tag("text"))
+    if text_el is None:
+        return (child.text or "").strip()
+    lines = [
+        "".join("".join(lit.itertext()) for lit in paragraph.iter(_tag("lit")))
+        for paragraph in text_el.findall(_tag("p"))
+    ]
+    return RichNote("\n".join(lines).strip("\n"), _serialize_local(child))
 
 
 def _bool(el: ET.Element, local: str, default: bool = False) -> bool:
@@ -327,7 +380,7 @@ def _build_tag(el: ET.Element) -> Tag | None:
         rank=_int(el, "rank", 0) or 0,
         added=_parse_dt_utc(_text(el, "added")),
         modified=_parse_dt_utc(_text(el, "modified")),
-        note=_text(el, "note") or "",
+        note=_note(el),
         hidden=_parse_dt_utc(_text(el, "hidden")),
         on_hold=_bool(el, "prohibits-next-action"),
     )
@@ -516,7 +569,7 @@ def _build_project(el: ET.Element) -> Project | None:
         flagged=_bool(el, "flagged"),
         due=_parse_dt_local(_text(el, "due")),
         start=_parse_dt_local(_text(el, "start")),
-        note=_text(el, "note"),
+        note=_note(el),
         completed=_parse_dt_utc(_text(el, "completed")),
         last_review=(_parse_dt_utc(_text(proj, "last-review")) if proj is not None else None),
         next_review=(_parse_dt_utc(_text(proj, "next-review")) if proj is not None else None),
@@ -565,7 +618,7 @@ def _build_task(el: ET.Element, project_id: str | None) -> Task | None:
         due=_parse_dt_local(_text(el, "due")),
         start=_parse_dt_local(_text(el, "start")),
         hidden=hidden,
-        note=_text(el, "note"),
+        note=_note(el),
         rank=_int(el, "rank", 0) or 0,
         repetition_rule=_text(el, "repetition-rule") or None,
         estimated_minutes=_int(el, "estimated-minutes"),
@@ -749,4 +802,5 @@ def build_model(
         tags=tags,
         perspectives=perspectives,
         settings=settings,
+        parser_version=PARSER_VERSION,
     )

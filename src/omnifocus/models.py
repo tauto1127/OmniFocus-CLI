@@ -20,6 +20,30 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+# Bumped whenever the parser starts reading data that cached models lack, so stale
+# pickle caches are rebuilt instead of reused.
+PARSER_VERSION = 2
+
+
+class RichNote(str):
+    """A note's plain text that remembers the app's original rich-text XML.
+
+    OmniFocus stores notes as ``<note><text><p><run><lit>…`` markup. The plain text is
+    what every reader sees; ``xml`` is the untouched ``<note>`` element so writers can
+    send it back unchanged instead of flattening (or erasing) the formatting. Any string
+    operation returns a plain :class:`str`, so an edited note is written as plain text.
+    """
+
+    xml: str
+
+    def __new__(cls, text: str, xml: str) -> RichNote:
+        obj = super().__new__(cls, text)
+        obj.xml = xml
+        return obj
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (RichNote, (str(self), self.xml))
+
 
 @dataclass(frozen=True)
 class Folder:
@@ -236,6 +260,7 @@ class OFModel:
     perspectives: dict[str, Perspective] = field(default_factory=dict)
     settings: dict[str, Any] = field(default_factory=dict)
     parsed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    parser_version: int = 0
 
     @property
     def active_tasks(self) -> list[Task]:
@@ -249,5 +274,29 @@ class OFModel:
 
     @property
     def active_projects(self) -> list[Project]:
-        """Return projects with status 'active'."""
-        return [p for p in self.projects.values() if p.status == "active"]
+        """Return projects whose effective status is 'active'."""
+        return [p for p in self.projects.values() if self.effective_project_status(p) == "active"]
+
+    def folder_dropped_at(self, folder_id: str | None) -> datetime | None:
+        """Return when *folder_id* or one of its ancestors was dropped, else ``None``."""
+        seen: set[str] = set()
+        while folder_id and folder_id not in seen:
+            seen.add(folder_id)
+            folder = self.folders.get(folder_id)
+            if folder is None:
+                return None
+            if folder.hidden is not None:
+                return folder.hidden
+            folder_id = folder.parent_folder_id
+        return None
+
+    def effective_project_status(self, project: Project) -> str:
+        """Return the status the apps show for *project*.
+
+        A project inside a dropped folder (at any depth) keeps its own stored status,
+        but OmniFocus treats it as dropped, so active/on-hold projects there report
+        ``"dropped"``.
+        """
+        if project.status in {"active", "inactive"} and self.folder_dropped_at(project.folder_id):
+            return "dropped"
+        return project.status

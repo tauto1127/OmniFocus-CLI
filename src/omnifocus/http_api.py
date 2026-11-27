@@ -328,6 +328,8 @@ class ProjectSummaryModel(EnvelopeModel):
     planned_date_alarm_policy: str | None = None
     folder_name: str | None
     tag_names: list[str]
+    own_status: str | None = None
+    dropped_by_folder: bool = False
     review_due: bool
     review_basis: Literal["next_review", "interval", "unknown"]
 
@@ -359,6 +361,8 @@ class FolderSummaryModel(EnvelopeModel):
     rank: int
     added: datetime
     modified: datetime
+    hidden: datetime | None = None
+    dropped: bool = False
     child_folder_ids: list[str] = Field(default_factory=list)
     project_ids: list[str] = Field(default_factory=list)
 
@@ -372,6 +376,7 @@ class FolderTreeFolderModel(EnvelopeModel):
     rank: int
     added: datetime
     modified: datetime
+    hidden: datetime | None = None
 
 
 class FolderTreeProjectModel(EnvelopeModel):
@@ -404,6 +409,9 @@ class FolderTreeProjectModel(EnvelopeModel):
     defer_date_alarm_policy: str | None = None
     latest_time_to_start_alarm_policy: str | None = None
     planned_date_alarm_policy: str | None = None
+    order: str = "parallel"
+    own_status: str | None = None
+    dropped_by_folder: bool = False
 
 
 class FolderTreeNodeModel(EnvelopeModel):
@@ -1371,10 +1379,10 @@ def create_app(
         response_model=SuccessEnvelope[list[FolderSummaryModel]],
         responses=_FASTAPI_ERROR_RESPONSES,
     )
-    async def list_folders() -> JSONResponse:
-        """List folders."""
+    async def list_folders(include_dropped: bool = Query(False)) -> JSONResponse:
+        """List folders; dropped folders are included only with `include_dropped=true`."""
 
-        data = await resolved_service.list_folders()
+        data = await resolved_service.list_folders(include_dropped=include_dropped)
         return _success_envelope([FolderSummaryModel.model_validate(item) for item in data])
 
     @app.get(
@@ -1382,11 +1390,13 @@ def create_app(
         response_model=SuccessEnvelope[FolderTreeDataModel],
         responses=_FASTAPI_ERROR_RESPONSES,
     )
-    async def get_folder_tree() -> JSONResponse:
-        """Return the nested folder tree structure."""
+    async def get_folder_tree(include_all: bool = Query(False)) -> JSONResponse:
+        """Return the nested folder tree; `include_all=true` adds dropped and done items."""
 
         return _success_envelope(
-            FolderTreeDataModel.model_validate(await resolved_service.get_folder_tree())
+            FolderTreeDataModel.model_validate(
+                await resolved_service.get_folder_tree(include_all=include_all)
+            )
         )
 
     @app.get(

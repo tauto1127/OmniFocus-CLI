@@ -586,8 +586,19 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="list_folders",
-            description="List all OmniFocus folders.",
-            inputSchema={"type": "object", "properties": {}},
+            description=(
+                "List OmniFocus folders. Dropped folders (hidden in the apps) are left out "
+                "unless include_dropped is true."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "include_dropped": {
+                        "type": "boolean",
+                        "description": "Also list dropped folders (default: false)",
+                    }
+                },
+            },
         ),
         Tool(
             name="get_folder",
@@ -600,8 +611,20 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="get_folder_tree",
-            description="Return the nested folder hierarchy with direct child projects.",
-            inputSchema={"type": "object", "properties": {}},
+            description=(
+                "Return the nested folder hierarchy with direct child projects, as the apps "
+                "show it: dropped folders and done or dropped projects are left out unless "
+                "include_all is true."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "include_all": {
+                        "type": "boolean",
+                        "description": "Include dropped folders and done/dropped projects",
+                    }
+                },
+            },
         ),
         Tool(
             name="add_folder",
@@ -998,7 +1021,9 @@ async def _handle_mark_project_reviewed(args: dict[str, Any]) -> list[TextConten
 
 
 async def _handle_list_folders(args: dict[str, Any]) -> list[TextContent]:
-    return await _service_text(_service().list_folders())
+    return await _service_text(
+        _service().list_folders(include_dropped=bool(args.get("include_dropped", False)))
+    )
 
 
 async def _handle_get_folder(args: dict[str, Any]) -> list[TextContent]:
@@ -1006,7 +1031,9 @@ async def _handle_get_folder(args: dict[str, Any]) -> list[TextContent]:
 
 
 async def _handle_get_folder_tree(args: dict[str, Any]) -> list[TextContent]:
-    return await _service_text(_service().get_folder_tree())
+    return await _service_text(
+        _service().get_folder_tree(include_all=bool(args.get("include_all", False)))
+    )
 
 
 async def _handle_add_folder(args: dict[str, Any]) -> list[TextContent]:

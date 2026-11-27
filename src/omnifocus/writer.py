@@ -22,7 +22,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from omnifocus.models import Folder, Project, Tag, Task
+from omnifocus.models import Folder, Project, RichNote, Tag, Task
 
 _NS = "http://www.omnigroup.com/namespace/OmniFocus/v2"
 _APP_ID = "com.omnigroup.OmniFocus4"
@@ -177,6 +177,12 @@ class TransactionBuilder:
             return f"<{tag}{extra_attrs}/>"
         return f"<{tag}{extra_attrs}>{inner}</{tag}>"
 
+    def _note_xml(self, note: str) -> str:
+        """Render a ``<note>``, re-sending the app's rich text when the note is unchanged."""
+        if isinstance(note, RichNote):
+            return note.xml
+        return self._leaf("note", note)
+
     def _leaf(self, tag: str, text: str | None) -> str:
         """Render a leaf element. Empty or ``None`` text yields a self-closing tag."""
         if text is None or text == "":
@@ -256,7 +262,7 @@ class TransactionBuilder:
         if name is not None:
             children.append(self._leaf("name", name))
         if note is not None:
-            children.append(self._leaf("note", note))
+            children.append(self._note_xml(note))
         if rank is not None:
             children.append(self._leaf("rank", str(rank)))
         if hidden_dt is not None:
@@ -318,7 +324,7 @@ class TransactionBuilder:
         if name is not None:
             children.append(self._leaf("name", name))
         if note is not None:
-            children.append(self._leaf("note", note))
+            children.append(self._note_xml(note))
         if rank is not None:
             children.append(self._leaf("rank", str(rank)))
         if hidden_dt is not None:
